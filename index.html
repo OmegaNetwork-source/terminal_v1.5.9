@@ -416,16 +416,28 @@
         .input-field {
             background: transparent;
             border: none;
-            color: transparent; /* Make text transparent */
-            text-shadow: 0 0 0 #ffffff; /* Show text via shadow */
+            color: #ffffff;
             font-family: 'Courier New', monospace;
             font-size: 16px;
             outline: none;
             flex: 1;
             padding: 5px;
-            caret-color: transparent; /* Hide the blinking cursor */
             width: 100%; /* Extend full width */
             min-width: 400px; /* Minimum width */
+            /* AGGRESSIVE CURSOR HIDING - Multiple methods */
+            caret-color: transparent !important;
+            text-shadow: none !important;
+            /* Mobile optimizations */
+            -webkit-user-select: text;
+            user-select: text;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+            /* Prevent mobile zoom on focus */
+            font-size: 16px !important;
+            transform-origin: left center;
+            /* Alternative cursor hiding methods */
+            text-indent: 0px;
+            letter-spacing: normal;
         }
 
         .input-field::placeholder {
@@ -1547,7 +1559,7 @@
                         // Tab: autocomplete
                         if (e.key === 'Tab') {
                             e.preventDefault();
-                            const val = input.value.trim();
+                            const val = input.getRealValue ? input.getRealValue().trim() : input.value.trim();
                             if (!val) return;
                             const matches = this.availableCommands.filter(cmd => cmd.startsWith(val));
                             if (matches.length === 1) {
@@ -1559,7 +1571,7 @@
                     });
                     input.addEventListener('keypress', async (e) => {
                         if (e.key === 'Enter') {
-                            const val = input.value;
+                            const val = input.getRealValue ? input.getRealValue() : input.value;
                             input.value = '';
                             if (this.awaitingPromptInput && this.promptResolver) {
                                 const value = val.trim();
@@ -1581,6 +1593,68 @@
                             // 'this' is not needed here, as isStressTesting is not used in this context
                         }
                     });
+                    
+                    // ALTERNATIVE APPROACH: Hide cursor completely and show fake cursor
+                    let hasTyped = false;
+                    
+                    // Create a fake cursor element that we control
+                    const createFakeCursor = () => {
+                        const cursor = document.createElement('span');
+                        cursor.id = 'fake-cursor';
+                        cursor.textContent = '|';
+                        cursor.style.cssText = `
+                            color: #ffffff;
+                            animation: blink 1s infinite;
+                            position: absolute;
+                            right: 10px;
+                            top: 50%;
+                            transform: translateY(-50%);
+                            pointer-events: none;
+                            font-family: 'Courier New', monospace;
+                            font-size: 16px;
+                        `;
+                        
+                        // Add to input container
+                        const inputContainer = input.parentElement;
+                        if (inputContainer) {
+                            inputContainer.style.position = 'relative';
+                            inputContainer.appendChild(cursor);
+                        }
+                        
+                        return cursor;
+                    };
+                    
+                    // Hide fake cursor when user starts typing
+                    const hideFakeCursor = () => {
+                        hasTyped = true;
+                        const fakeCursor = document.getElementById('fake-cursor');
+                        if (fakeCursor) {
+                            fakeCursor.style.display = 'none';
+                        }
+                    };
+                    
+                    // Show fake cursor when input is empty
+                    const showFakeCursor = () => {
+                        if (!hasTyped && input.value.trim() === '') {
+                            const fakeCursor = document.getElementById('fake-cursor');
+                            if (fakeCursor) {
+                                fakeCursor.style.display = 'inline';
+                            }
+                        }
+                    };
+                    
+                    // Create fake cursor initially
+                    setTimeout(createFakeCursor, 100);
+                    
+                    // Hide fake cursor on first keystroke
+                    input.addEventListener('input', hideFakeCursor);
+                    input.addEventListener('keydown', hideFakeCursor);
+                    
+                    // Simple getRealValue method
+                    input.getRealValue = function() {
+                        return this.value;
+                    };
+                    
                     // Fallback: refocus input if user clicks anywhere in the terminal
                     document.getElementById('terminal').addEventListener('click', function() {
                         input.focus();
@@ -6763,7 +6837,7 @@
                     let username = null;
                     
                     try {
-                        const profileResponse = await fetch(`${RELAYER_URL}/v1/users/${walletAddress}/profile`);
+                        const profileResponse = await fetch(`${OMEGA_API_URL}/v1/users/${walletAddress}/profile`);
                         const profileData = await profileResponse.json();
                         
                         if (profileData.success && profileData.data.profile.username) {
@@ -6836,7 +6910,7 @@
                 this.log(`👤 Loading profile for: ${walletAddress}`, 'info');
                 
                 try {
-                    const response = await fetch(`${RELAYER_URL}/v1/users/${walletAddress}/profile`);
+                    const response = await fetch(`${OMEGA_API_URL}/v1/users/${walletAddress}/profile`);
                     const data = await response.json();
                     
                     if (!data.success) {
@@ -6914,7 +6988,7 @@
                 
                 // First check if profile exists
                 try {
-                    const response = await fetch(`${RELAYER_URL}/v1/users/${walletAddress}/profile`);
+                    const response = await fetch(`${OMEGA_API_URL}/v1/users/${walletAddress}/profile`);
                     const data = await response.json();
                     
                     if (!data.success) {
@@ -6969,7 +7043,7 @@
                 this.log(`📊 Loading activity for: ${walletAddress}`, 'info');
                 
                 try {
-                    const response = await fetch(`${RELAYER_URL}/v1/users/${walletAddress}/activity?limit=10`);
+                    const response = await fetch(`${OMEGA_API_URL}/v1/users/${walletAddress}/activity?limit=10`);
                     const data = await response.json();
                     
                     if (!data.success) {
@@ -7126,7 +7200,7 @@
                 this.log('📤 Submitting your profile...', 'info');
                 
                 try {
-                    const response = await fetch(`${RELAYER_URL}/v1/users/${this.profileData.walletAddress}/profile`, {
+                    const response = await fetch(`${OMEGA_API_URL}/v1/users/${this.profileData.walletAddress}/profile`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -7189,11 +7263,11 @@
                 this.log(`🔍 Testing profile for: ${walletAddress}`, 'info');
                 this.log('', 'info');
                 
-                // Test LOCAL relayer endpoint
-                this.log('1. 🏠 LOCAL RELAYER TEST (localhost:4000)', 'info');
+                // Test MAIN API endpoint
+                this.log('1. 🌐 OMEGA API TEST (omeganetwork.co)', 'info');
                 this.log('   ─────────────────────────────────────────', 'info');
                 try {
-                    const localResponse = await fetch(`${RELAYER_URL}/v1/users/${walletAddress}/profile`);
+                    const localResponse = await fetch(`${OMEGA_API_URL}/v1/users/${walletAddress}/profile`);
                     this.log(`   📡 Status: ${localResponse.status}`, localResponse.ok ? 'success' : 'error');
                     
                     const localData = await localResponse.json();
@@ -7214,11 +7288,11 @@
                 
                 this.log('', 'info');
                 
-                // Test PRODUCTION API endpoint
-                this.log('2. 🌐 PRODUCTION API TEST (omeganetwork.co)', 'info');
+                // Test PRODUCTION RELAYER endpoint
+                this.log('2. ⚙️ PRODUCTION RELAYER TEST (terminal-v1-5-9.onrender.com)', 'info');
                 this.log('   ─────────────────────────────────────────', 'info');
                 try {
-                    const prodResponse = await fetch(`${OMEGA_API_URL}/v1/users/${walletAddress}/profile`);
+                    const prodResponse = await fetch(`${RELAYER_URL}/v1/users/${walletAddress}/profile`);
                     this.log(`   📡 Status: ${prodResponse.status}`, prodResponse.ok ? 'success' : 'error');
                     
                     const prodData = await prodResponse.json();
@@ -7239,10 +7313,10 @@
                 
                 this.log('', 'info');
                 this.log('🎯 DIAGNOSIS:', 'success');
-                this.log('• If LOCAL has username but PRODUCTION doesn\'t: Profile only saved locally', 'info');
+                this.log('• If OMEGA API has username but RELAYER doesn\'t: Use main API for profiles', 'info');
                 this.log('• If both have same username: Data sync is working', 'info');
                 this.log('• If neither has username: Profile registration failed', 'info');
-                this.log('• If PRODUCTION shows different data: Database mismatch', 'info');
+                this.log('• If RELAYER shows 404: Production relayer missing profile endpoints', 'info');
             }
 
             async testProfileEndpoints() {
@@ -7262,25 +7336,25 @@
                 this.log('🧪 PROFILE ENDPOINT TESTS', 'success');
                 this.log('═══════════════════════════', 'success');
                 
-                // Test 1: Check if relayer is running
-                this.log('1. 🔗 Testing relayer connection...', 'info');
+                // Test 1: Check if production relayer is running
+                this.log('1. 🔗 Testing production relayer connection...', 'info');
                 try {
                     const healthResponse = await fetch(`${RELAYER_URL}/api/health/liveness`);
                     if (healthResponse.ok) {
-                        this.log('   ✅ Relayer is running!', 'success');
+                        this.log('   ✅ Production relayer is running!', 'success');
                     } else {
-                        this.log('   ❌ Relayer returned error status', 'error');
+                        this.log('   ❌ Production relayer returned error status', 'error');
                     }
                 } catch (error) {
-                    this.log(`   💥 Relayer connection failed: ${error.message}`, 'error');
-                    this.log('   💡 Make sure "node relayer-faucet.js" is running on port 4000', 'info');
+                    this.log(`   💥 Production relayer connection failed: ${error.message}`, 'error');
+                    this.log('   💡 Check if terminal-v1-5-9.onrender.com is up', 'info');
                 }
                 
                 // Test 2: Test profile GET endpoint
                 this.log('', 'info');
                 this.log('2. 📖 Testing profile GET endpoint...', 'info');
                 try {
-                    const response = await fetch(`${RELAYER_URL}/v1/users/${walletAddress}/profile`);
+                    const response = await fetch(`${OMEGA_API_URL}/v1/users/${walletAddress}/profile`);
                     this.log(`   📡 Response status: ${response.status}`, response.ok ? 'success' : 'error');
                     
                     const data = await response.json();
@@ -7303,7 +7377,7 @@
                     
                     this.log(`   📤 Test payload: ${JSON.stringify(testData, null, 2)}`, 'output');
                     this.log('   ℹ️ This would POST to:', 'info');
-                    this.log(`   ${RELAYER_URL}/v1/users/${walletAddress}/profile`, 'output');
+                    this.log(`   ${OMEGA_API_URL}/v1/users/${walletAddress}/profile`, 'output');
                     this.log('   💡 Use "profile register" to actually save data', 'info');
                 } catch (error) {
                     this.log(`   💥 POST test setup failed: ${error.message}`, 'error');
@@ -7311,8 +7385,8 @@
                 
                 this.log('', 'info');
                 this.log('🎯 NEXT STEPS:', 'success');
-                this.log('• If connection fails: Start relayer with "node relayer-faucet.js"', 'info');
-                this.log('• If GET works: Use "profile debug" to compare local vs production', 'info');
+                this.log('• If connection fails: Check if production servers are up', 'info');
+                this.log('• If GET works: Use "profile debug" to compare main API vs relayer', 'info');
                 this.log('• If POST endpoint exists: Try "profile register" again', 'info');
             }
 
